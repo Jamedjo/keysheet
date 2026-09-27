@@ -1,0 +1,73 @@
+# The sway sheet, as it comes. Copy to ~/.config/keysheet/sway.toml and make
+# it yours -- this file is compiled in and used only until you do.
+#
+# It deliberately covers what sway's own example configuration binds and
+# nothing else, because anything past that is somebody's particular setup.
+
+title = "Keyboard"
+
+# The one thing a first-time reader of this sheet cannot guess: there is
+# nothing to dismiss first, because whatever you press does its own job on
+# the way out. sway grabs its bindings before this window sees them.
+hint = "any key runs its binding and closes the sheet"
+
+# What prints the bindings. `keylist sway` is the default for a sheet named
+# sway, so this line is here to be read rather than because it is needed.
+source = ["keylist", "sway"]
+
+# Where a binding goes when no group below claims it. Comment it out and
+# unclaimed bindings are dropped instead, which is how you write a sheet that
+# shows only what you asked for.
+fallback = "Other"
+
+# Matching runs in the order the groups are written below, most specific
+# first, because the words overlap: "move container to workspace" is about
+# workspaces although it moves a window, so Workspaces has to be written above
+# Move. This is the order they are *printed* in, which is not the same thing:
+# what you press constantly comes before what you press once a day.
+order = ["Focus", "Move", "Size", "Layout", "Windows", "Workspaces", "Launch", "Session"]
+
+# The band along the bottom. keysheet cannot know how this sheet was opened --
+# a keybinding, a mouse button, a launcher, a login script -- so if you want
+# the chord printed down there, write it here. Leave the whole table out and
+# there is no band.
+[foot]
+note = "read dynamically from ~/.config/sway/config"
+
+# keywords are matched against the chord, the description and the command,
+# lower-cased. command_starts_with is matched against the command alone.
+# keys matches a whole chord exactly, which is how you call out the handful
+# you are still learning. hidden = true drops what it matches instead of
+# printing it.
+
+[[group]]
+name = "Workspaces"
+keywords = ["workspace"]
+
+[[group]]
+name = "Focus"
+keywords = ["focus"]
+
+[[group]]
+name = "Move"
+keywords = ["move", "swap"]
+
+[[group]]
+name = "Size"
+keywords = ["resize"]
+
+[[group]]
+name = "Layout"
+keywords = ["split", "layout", "tabbed", "stacking", "fullscreen", "floating", "scratchpad"]
+
+[[group]]
+name = "Windows"
+keywords = ["kill", "sticky", "border"]
+
+[[group]]
+name = "Session"
+keywords = ["reload", "exit", "swaylock", "swaynag", "systemctl"]
+
+[[group]]
+name = "Launch"
+command_starts_with = "exec"

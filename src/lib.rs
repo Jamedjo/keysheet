@@ -1,23 +1,28 @@
-//! Two halves of one tool, with JSON as the seam between them.
+//! keysheet: a sheet of the keybindings you configured, for any program.
 //!
-//! `sway-keylist` reads the sway config and prints what it found. It knows
-//! nothing about screens: it parses (`bindings`), optionally sorts into
-//! groups (`groups`), and writes JSON to stdout, which makes the list
-//! something a script can have as well as something you can look at.
+//! Two halves, with JSON as the seam between them.
 //!
-//! `sway-cheatsheet` runs that and draws the result (`sheet`). It has no
-//! parser of its own -- the only bindings it can show are the ones the
-//! command prints, so what is on the sheet and what comes out of the pipe
-//! cannot disagree.
+//! An **adaptor** reads one program's configuration and prints its bindings:
+//! a flat JSON array of `{keys, description}`, and nothing else is required of
+//! it. `keylist` carries the one for sway and dispatches to `keylist-<name>`
+//! on PATH for everything else, so adding a program means writing one command
+//! -- in any language -- rather than changing anything here.
+//!
+//! The **sheet** (`keysheet <name>`) reads `~/.config/keysheet/<name>.toml`,
+//! runs whatever source it names, sorts the reply into that file's groups and
+//! draws it. It has no parser and no taxonomy of its own, and nothing in it
+//! knows about sway.
 
-pub mod bindings;
-pub mod groups;
+pub mod adaptors;
+pub mod binding;
 pub mod sheet;
+pub mod source;
 
 use std::path::PathBuf;
 
-/// Where both halves look for their files: sway's config, and the taxonomy
-/// and stylesheet beside it.
+/// The adaptor multiplexer, and the default source for a sheet.
+pub const KEYLIST: &str = "keylist";
+
 pub fn config_dir() -> PathBuf {
     std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)

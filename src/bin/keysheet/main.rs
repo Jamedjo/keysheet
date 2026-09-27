@@ -1,59 +1,117 @@
-//! sway-cheatsheet: every keybinding you have, read from the config you run.
+//! keysheet: a sheet of the keybindings you configured, for any program.
 //!
-//! Nothing here is written down twice. The bindings come out of
-//! ~/.config/sway/config and its includes, the descriptions come from the
-//! comments already above them, and the whole thing is rebuilt each time it
-//! opens -- so it cannot fall out of step with the config the way a hand-kept
-//! list does.
+//! Nothing here is written down twice and nothing here is about sway. The
+//! bindings come from whatever command `~/.config/keysheet/<name>.toml` names,
+//! the title and the footer come from the same file, and nothing is cached --
+//! so it cannot fall out of step with the config it describes the way a
+//! hand-kept list does.
 //!
-//! None of that reading happens here. This half runs `sway-keylist --grouped`
-//! and lays out the JSON it gets back; everything above is that command's
-//! doing. What is left in this file is the window, the lanes and the caps.
+//! What is left in this file is the window, the lanes and the caps.
 
 mod shell;
 
 use gtk::glib;
 use gtk::prelude::*;
 
-use sway_cheatsheet::bindings::Binding;
-use sway_cheatsheet::groups::Group;
-use sway_cheatsheet::sheet;
+use keysheet::binding::Binding;
+use keysheet::sheet::{Group, Sheet};
+use keysheet::source;
 
-const APP_ID: &str = "dev.jamedjo.sway-cheatsheet";
-const DEFAULT_CSS: &str = include_str!("../../../cheatsheet.css");
+const APP_ID: &str = "dev.jamedjo.keysheet";
+const DEFAULT_CSS: &str = include_str!("../../../style.css");
+
+const USAGE: &str = "\
+keysheet -- a sheet of the keybindings you configured
+
+usage: keysheet <name>
+
+  Reads ~/.config/keysheet/<name>.toml, runs the source it names -- by
+  default `keylist <name>` -- and draws what comes back. A sheet with no
+  config file is not an error: it shows whatever the adaptor prints.
+
+  KEYSHEET_PIN=1 leaves the window up instead of closing it on the first
+  keypress, which is how you photograph it.
+";
 
 fn main() -> glib::ExitCode {
-    let app = gtk::Application::builder().application_id(APP_ID).build();
-    app.connect_startup(|_| shell::load_css("sway-cheatsheet/style.css", DEFAULT_CSS));
+    let mut args = std::env::args().skip(1);
+    let Some(name) = args.next() else {
+        eprint!("{USAGE}");
+        return glib::ExitCode::FAILURE;
+    };
+    if name == "-h" || name == "--help" {
+        print!("{USAGE}");
+        return glib::ExitCode::SUCCESS;
+    }
+    if let Some(extra) = args.next() {
+        eprintln!("keysheet: unexpected argument {extra}\n");
+        eprint!("{USAGE}");
+        return glib::ExitCode::FAILURE;
+    }
+
+    // One application id per sheet, so a vim sheet and a sway sheet toggle
+    // independently rather than closing each other -- and so a window rule can
+    // still catch them all at once with a pattern on the prefix.
+    let app = gtk::Application::builder()
+        .application_id(app_id(&name))
+        .build();
+
+    let path = Sheet::path_for(&name);
+    let sheet = match Sheet::load(&name, &path) {
+        Ok(sheet) => std::rc::Rc::new(sheet),
+        Err(complaint) => {
+            eprintln!("keysheet: {complaint}");
+            return glib::ExitCode::FAILURE;
+        }
+    };
+
+    {
+        let sheet = std::rc::Rc::clone(&sheet);
+        app.connect_startup(move |_| shell::load_css(&sheet.style(), DEFAULT_CSS));
+    }
 
     // Same single-instance toggle sway-switchboard uses: a second launch is
     // another activate on the first process, so it closes rather than stacking.
-    app.connect_activate(|app| {
+    app.connect_activate(move |app| {
         if let Some(open) = app.windows().first() {
             open.close();
         } else {
-            build_ui(app);
+            build_ui(app, &name, &sheet);
         }
     });
-    app.run()
+    app.run_with_args::<&str>(&[])
 }
 
-fn build_ui(app: &gtk::Application) {
+/// "sway" -> "dev.jamedjo.keysheet.sway", where that is a legal application
+/// id. GTK wants dot-separated elements of letters, digits, hyphens and
+/// underscores, each starting with a letter -- a sheet named "2fa" is not one,
+/// and takes the bare id rather than being refused a window over its name.
+fn app_id(name: &str) -> String {
+    let legal = name.starts_with(|c: char| c.is_ascii_alphabetic())
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if legal {
+        format!("{APP_ID}.{name}")
+    } else {
+        APP_ID.to_string()
+    }
+}
+
+fn build_ui(app: &gtk::Application, name: &str, sheet_config: &Sheet) {
     let window = gtk::ApplicationWindow::builder()
         .application(app)
         .decorated(false)
         .build();
 
-    // An ordinary window, not a layer-shell overlay. sway-switchboard is a
-    // menu -- it appears, you pick, it goes -- and an overlay is right for
-    // that. A cheatsheet is a reference: you may want it beside the thing you
-    // are doing, moved, resized, or tabbed behind something else, and all of
-    // that is what the window tree is for. sway/config floats it and gives it
-    // a size.
+    // An ordinary window, not a layer-shell overlay. A sheet is a reference:
+    // you may want it beside the thing you are doing, moved, resized, or
+    // tabbed behind something else, and all of that is what the window tree is
+    // for. Floating it at a size is the window manager's job, and its rule can
+    // match the application id.
+    let title = sheet_config.title(name);
     window.set_default_size(1400, 900);
-    window.set_title(Some("Keyboard"));
+    window.set_title(Some(&title));
 
-    window.add_css_class("cheatsheet");
+    window.add_css_class("keysheet");
 
     // Any key closes it, and so does losing focus.
     //
@@ -65,10 +123,10 @@ fn build_ui(app: &gtk::Application) {
     //
     // Which leaves moving it as the only thing you can do to it, and that is
     // the whole reason it is a window rather than an overlay.
-    // SWAY_CHEATSHEET_PIN leaves it up: with the closers armed the window goes
-    // away on the first key pressed anywhere, which is right in use and makes
-    // it impossible to photograph or to poke at while working on it.
-    let pinned = std::env::var_os("SWAY_CHEATSHEET_PIN").is_some();
+    // KEYSHEET_PIN leaves it up: with the closers armed the window goes away
+    // on the first key pressed anywhere, which is right in use and makes it
+    // impossible to photograph or to poke at while working on it.
+    let pinned = std::env::var_os("KEYSHEET_PIN").is_some();
 
     // Only a key-up for a key we saw go down.
     //
@@ -116,7 +174,7 @@ fn build_ui(app: &gtk::Application) {
     // other way round: the header says what this is and the footer band
     // carries the sheet's bottom corners, and neither of those is something
     // to scroll away. Only the lanes move if a very long config outgrows the
-    // height sway floats this at.
+    // height the window is floated at.
     let sheet = gtk::Box::new(gtk::Orientation::Vertical, 0);
     sheet.add_css_class("sheet");
     window.set_child(Some(&sheet));
@@ -129,18 +187,18 @@ fn build_ui(app: &gtk::Application) {
         .build();
 
     // The list, and with it whatever went wrong getting it. A sheet that
-    // cannot reach sway-keylist says so where the bindings would have been:
-    // an empty window looks like a config with nothing in it, which is a
+    // cannot reach its source says so where the bindings would have been: an
+    // empty window looks like a config with nothing in it, which is a
     // different problem with a different fix.
-    let (groups, trouble) = match sheet::load() {
-        Ok(groups) => (groups, None),
+    let (groups, trouble) = match source::run(&sheet_config.source(name)) {
+        Ok(bindings) => (sheet_config.sort(bindings), None),
         Err(complaint) => {
-            eprintln!("sway-cheatsheet: {complaint}");
+            eprintln!("keysheet: {complaint}");
             (Vec::new(), Some(complaint))
         }
     };
     let count = groups.iter().map(|g| g.bindings.len()).sum();
-    sheet.append(&header(count));
+    sheet.append(&header(&title, sheet_config.hint(), count));
 
     // Columns, because a single column of a hundred and thirty is a scroll,
     // and a sheet you have to scroll is one you stop opening.
@@ -192,7 +250,11 @@ fn build_ui(app: &gtk::Application) {
                     .expect("at least one lane");
                 let group_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
                 group_box.add_css_class("group");
-                group_box.append(&heading(&group.name));
+                // A sheet with no groups configured yields one nameless run,
+                // and a blank heading above it would read as a missing word.
+                if !group.name.is_empty() {
+                    group_box.append(&heading(&group.name));
+                }
                 for binding in &group.bindings {
                     group_box.append(&row(binding));
                 }
@@ -218,34 +280,37 @@ fn build_ui(app: &gtk::Application) {
         window.connect_default_width_notify(move |w| relayout(lanes_for(w.default_width())));
     }
 
-    sheet.append(&footer());
+    if let Some(foot) = footer(sheet_config.foot()) {
+        sheet.append(&foot);
+    }
 
     window.present();
 }
 
-fn header(count: usize) -> gtk::Box {
+fn header(title: &str, hint: Option<&str>, count: usize) -> gtk::Box {
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     row.add_css_class("sheet-head");
     row.set_baseline_position(gtk::BaselinePosition::Bottom);
 
-    let title = gtk::Label::new(Some("Keyboard"));
-    title.add_css_class("sheet-title");
-    title.set_xalign(0.0);
+    let name = gtk::Label::new(Some(title));
+    name.add_css_class("sheet-title");
+    name.set_xalign(0.0);
     // Both the title and the hint sit on one baseline. A box only aligns
     // baselines if its children ask to be aligned that way, so setting it on
     // the hint alone left the hint floating at the top of a 34px title.
-    title.set_valign(gtk::Align::Baseline);
-    row.append(&title);
+    name.set_valign(gtk::Align::Baseline);
+    row.append(&name);
 
-    // The one thing a first-time reader cannot guess: there is nothing to
-    // dismiss first, because whatever you press does its own job on the way
-    // out.
-    let hint = gtk::Label::new(Some("any key runs its binding and closes the sheet"));
-    hint.add_css_class("sheet-hint");
-    hint.set_xalign(0.0);
-    hint.set_hexpand(true);
-    hint.set_valign(gtk::Align::Baseline);
-    row.append(&hint);
+    // Whatever a first-time reader of this particular sheet cannot guess --
+    // on a sway sheet, that there is nothing to dismiss first because whatever
+    // you press does its own job on the way out. Which is not true of every
+    // sheet, so the sheet file says it or nothing does.
+    let spacer = gtk::Label::new(hint);
+    spacer.add_css_class("sheet-hint");
+    spacer.set_xalign(0.0);
+    spacer.set_hexpand(true);
+    spacer.set_valign(gtk::Align::Baseline);
+    row.append(&spacer);
 
     // Natural width, not stretched: the tally wears the same capsule the caps
     // do, and a filled label would pull that pill the width of the header.
@@ -259,33 +324,38 @@ fn header(count: usize) -> gtk::Box {
 
 /// The band along the bottom, carrying the one thing worth saying twice.
 ///
-/// Which is how to get back here: printed as the caps themselves rather than
-/// as prose, so it is read the way the rows above it are read.
-fn footer() -> gtk::Box {
+/// Which is how to get back here -- printed as the caps themselves rather than
+/// as prose, so it is read the way the rows above it are read. keysheet cannot
+/// know that chord: it may have been opened from a keybinding, a mouse button,
+/// a launcher or a login script. So the sheet file says it, and a sheet that
+/// says none of this gets no band at all.
+fn footer(config: &keysheet::sheet::Foot) -> Option<gtk::Box> {
     let foot = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     foot.add_css_class("sheet-foot");
 
-    // Where the sheet comes from, which is the whole argument for it: nothing
-    // here was written down twice. It leads, quietly, from the left.
-    let from = gtk::Label::new(Some("read out of ~/.config/sway/config every time it opens"));
-    from.set_hexpand(true);
-    from.set_xalign(0.0);
-    from.set_valign(gtk::Align::Center);
-    foot.append(&from);
+    // Where the sheet comes from, which is usually the argument for it:
+    // nothing on it was written down twice. It leads, quietly, from the left.
+    let note = gtk::Label::new(config.note.as_deref());
+    note.set_hexpand(true);
+    note.set_xalign(0.0);
+    note.set_valign(gtk::Align::Center);
+    foot.append(&note);
 
-    // The one thing worth saying twice goes at the right, as real caps.
-    let caps = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    caps.add_css_class("keys");
-    caps.set_valign(gtk::Align::Center);
-    caps.append(&cap("Super", &["mod", "mod-super"]));
-    caps.append(&cap("?", &["key"]));
-    foot.append(&caps);
+    if let Some(keys) = config.keys.as_deref() {
+        let caps = chord(keys);
+        caps.set_valign(gtk::Align::Center);
+        foot.append(&caps);
+    }
 
-    let opens = gtk::Label::new(Some("opens this sheet"));
-    opens.set_xalign(0.0);
-    opens.set_valign(gtk::Align::Center);
-    foot.append(&opens);
-    foot
+    if let Some(label) = config.label.as_deref() {
+        let opens = gtk::Label::new(Some(label));
+        opens.set_xalign(0.0);
+        opens.set_valign(gtk::Align::Center);
+        foot.append(&opens);
+    }
+
+    let empty = config.note.is_none() && config.keys.is_none() && config.label.is_none();
+    if empty { None } else { Some(foot) }
 }
 
 /// What is on the sheet when there are no bindings to put there.

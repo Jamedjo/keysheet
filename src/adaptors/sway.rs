@@ -1,37 +1,13 @@
-//! sway's keybindings, read out of the config it is actually running.
+//! sway's keybindings, from ~/.config/sway/config and its includes.
 //!
-//! A cheatsheet written by hand is wrong the day after you change a binding.
-//! This one parses `bindsym` lines out of ~/.config/sway/config and whatever
-//! it includes, so it cannot drift: if the binding is not in the config, it is
-//! not on the sheet.
-//!
-//! Three things make the parse more than a grep. Variables have to be resolved
-//! or every row reads "$mod+..." instead of "Super+...". Mode blocks have to be
-//! tracked, because a binding inside `mode "resize"` is not a binding you can
-//! press right now. And the comment above a binding is worth more than the
-//! command it runs -- "Toggle night light" beats
-//! "exec /home/james/.config/sway/scripts/sway-nightlight" -- so the comment
-//! block immediately above each line is taken as its description.
+//! Variables are resolved, so a row reads "Super+d" rather than "$mod+d".
+//! Bindings inside a `mode` block carry that mode. The comment line directly
+//! above a binding is its description.
 
-use serde::{Deserialize, Serialize};
+use crate::binding::Binding;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-
-/// One row, and one object in the JSON `sway-keylist` prints.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Binding {
-    /// The mode it belongs to; "default" for the ones always live.
-    pub mode: String,
-    /// The chord, with variables resolved: "Super+Shift+d".
-    pub keys: String,
-    /// What it does, from the comment above it where there is one.
-    pub description: String,
-    /// The command itself, kept for deciding what to print rather than for
-    /// printing: a media key is judged by what it runs, not by whatever
-    /// comment happens to sit above it.
-    pub command: String,
-}
 
 /// The config sway itself reads, unless told otherwise.
 pub fn default_config() -> PathBuf {
@@ -67,7 +43,7 @@ pub fn tidy(mut bindings: Vec<Binding>) -> Vec<Binding> {
 /// it depicts is it worth a line, which is why this checks the description
 /// rather than just dropping every XF86.
 fn worth_printing(binding: &Binding) -> bool {
-    binding.mode == "default" && !does_what_it_says(&binding.keys, &binding.command)
+    binding.mode() == "default" && !does_what_it_says(&binding.keys, binding.command())
 }
 
 fn does_what_it_says(keys: &str, command: &str) -> bool {
@@ -123,7 +99,7 @@ fn collapse(bindings: Vec<Binding>) -> Vec<Binding> {
             let arrows = tails.iter().all(|t| ARROWS.contains(t));
             out.push(Binding {
                 command: first.command.clone(),
-                mode: first.mode,
+                mode: first.mode.clone(),
                 keys: if arrows {
                     format!("{head}+{}", ARROWS.join(""))
                 } else if tails.len() <= 3 {
@@ -139,8 +115,8 @@ fn collapse(bindings: Vec<Binding>) -> Vec<Binding> {
                 // "Switch to workspace 1-10" sits above $mod+1 and means all
                 // ten. Only when there is no comment does the command's shape
                 // stand in for one.
-                description: if first.description == describe(&first.command) {
-                    describe(&shape(&first.command))
+                description: if first.description == describe(first.command()) {
+                    describe(&shape(first.command()))
                 } else {
                     first.description.clone()
                 },
@@ -153,10 +129,10 @@ fn collapse(bindings: Vec<Binding>) -> Vec<Binding> {
 
     for binding in bindings {
         let joins = run.last().is_some_and(|prev: &Binding| {
-            prev.mode == binding.mode
+            prev.mode() == binding.mode()
                 && split_chord(&prev.keys).0 == split_chord(&binding.keys).0
-                && shape(&prev.command) == shape(&binding.command)
-                && shape(&binding.command) != binding.command.trim()
+                && shape(prev.command()) == shape(binding.command())
+                && shape(binding.command()) != binding.command().trim()
         });
         if !joins {
             flush(&mut run, &mut out);
@@ -237,9 +213,7 @@ fn parse_file(path: &Path, vars: &mut HashMap<String, String>, out: &mut Vec<Bin
             continue;
         }
 
-        // sway's parser is case-insensitive and the config uses both `set`
-        // and `Set`. Matching only the lower-case one left $mode_system
-        // undefined, and $mod was then substituted inside its name.
+        // sway's parser is case-insensitive: `Set $x` is `set $x`.
         let lower = line.to_ascii_lowercase();
         if lower.starts_with("set ") {
             let rest = &line[4..];
@@ -262,9 +236,8 @@ fn parse_file(path: &Path, vars: &mut HashMap<String, String>, out: &mut Vec<Bin
         }
 
         if let Some(rest) = line.strip_prefix("mode ") {
-            // `mode "resize" {` quotes it; `mode $mode_system {` does not, and
-            // the variable holds the quotes itself. Expand first, then take
-            // what is inside them, so both shapes land in the same place.
+            // `mode "resize" {` quotes the name. `mode $name {` gets its
+            // quotes from the variable, so expand first.
             let expanded = expand(rest.trim(), vars);
             let name = expanded
                 .split('"')
@@ -324,10 +297,10 @@ fn parse_bindsym(
     let description = shorten(&description);
 
     Some(Binding {
-        mode: mode.to_string(),
+        mode: Some(mode.to_string()),
         keys: pretty_keys(&keys),
         description,
-        command: expand(&command.join(" "), vars),
+        command: Some(expand(&command.join(" "), vars)),
     })
 }
 
@@ -356,12 +329,7 @@ fn describe(command: &str) -> String {
     }
 }
 
-/// A description is a line on a sheet, not a transcript.
-///
-/// Some bindings are a whole pipeline written inline -- the window switcher
-/// is a swaymsg, a jq, a fuzzel and two awks -- and printing it whole pushes
-/// everything else off the page while telling you nothing you could act on.
-/// Past this length only the first few words survive.
+/// Cuts a long inline pipeline to its first words.
 fn shorten(description: &str) -> String {
     const LIMIT: usize = 96;
     let clean = description.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -413,7 +381,7 @@ fn pretty_keys(keys: &str) -> String {
 
 fn expand(value: &str, vars: &HashMap<String, String>) -> String {
     let mut out = value.to_string();
-    // Longest first, so $mod does not eat the front of $mode_system.
+    // Longest first, so $mod does not replace the front of $modifier.
     let mut names: Vec<&String> = vars.keys().collect();
     names.sort_by_key(|n| std::cmp::Reverse(n.len()));
     for name in names {
@@ -462,18 +430,13 @@ fn glob_include(from: &Path, pattern: &str) -> Vec<PathBuf> {
 }
 
 
-/// One line per thing, not one per way of reaching it.
-///
-/// Help is bound to ?, to / and to Shift+/ so that it opens however you reach
-/// for the key -- but three rows saying the same thing is three rows of noise.
-/// The first spelling in the config wins, which is why the one worth printing
-/// is written first there.
+/// One row per command. The first chord in the config is the one printed.
 fn dedupe(bindings: Vec<Binding>) -> Vec<Binding> {
     let mut seen: Vec<String> = Vec::new();
     bindings
         .into_iter()
         .filter(|b| {
-            let key = format!("{}|{}", b.mode, b.command);
+            let key = format!("{}|{}", b.mode(), b.command());
             if seen.contains(&key) {
                 false
             } else {

@@ -1,8 +1,9 @@
-/* sway-cheatsheet's default look, which is sway's own.
+/* keysheet's default look, which is sway's own.
  *
  * The same colours sway's example configuration gives window borders, so the
  * sheet belongs to the desktop it appears on. Drop a copy at
- * ~/.config/sway-cheatsheet/style.css to wear your own instead.
+ * ~/.config/keysheet/style.css to wear your own instead, or point one sheet
+ * at its own with `style = "vim.css"` in its sheet file.
  *
  * GTK4 CSS. The sheet is read, not operated, so almost everything here is
  * typography and space: what a binding does, then the chord under it as one
@@ -24,7 +25,7 @@
 
 /* The window paints nothing at all.
  *
- * Deliberately not `window.cheatsheet`: this window is the whole screen, and
+ * Deliberately not `window.keysheet`: this window is the whole screen, and
  * when the class went missing once the selector stopped matching and GTK
  * filled the display with Adwaita grey. Styling the bare node means the only
  * window this process owns cannot be left painting over the desktop by an

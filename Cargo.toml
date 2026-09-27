@@ -1,14 +1,15 @@
 [package]
-name = "sway-cheatsheet"
+name = "keysheet"
 version = "0.1.0"
 edition = "2024"
+description = "The keybindings you configured, read out of the config that defines them"
 
 [dependencies]
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 toml = "1.1.4"
 
-# Only the sheet links GTK; sway-keylist is a plain filter and has no business
+# Only the sheet links GTK; keylist is a plain filter and has no business
 # pulling a toolkit in. v4_12 is what CssProvider::load_from_string needs; the
 # system GTK is 4.14.5, so the floor is comfortably met.
 gtk = { version = "0.10.3", package = "gtk4", features = ["v4_12"], optional = true }
@@ -18,10 +19,10 @@ default = ["sheet"]
 sheet = ["dep:gtk"]
 
 [[bin]]
-name = "sway-keylist"
-path = "src/bin/sway-keylist.rs"
+name = "keylist"
+path = "src/bin/keylist.rs"
 
 [[bin]]
-name = "sway-cheatsheet"
-path = "src/bin/sway-cheatsheet/main.rs"
+name = "keysheet"
+path = "src/bin/keysheet/main.rs"
 required-features = ["sheet"]
