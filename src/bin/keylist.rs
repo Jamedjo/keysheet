@@ -1,10 +1,8 @@
 //! keylist: one program's keybindings, as JSON.
 //!
-//! An adaptor multiplexer. `keylist sway` is answered here; `keylist vim` is
-//! answered by `keylist-vim` somewhere on PATH, which may be written in
-//! anything and is not this repo's business. Either way what lands on stdout
-//! is the same flat array, so `keysheet` -- or jq, or fzf, or a bar -- does
-//! not have to know which it got.
+//! `keylist sway` is built in. `keylist <name>` reads the `[lines]` table of
+//! `~/.config/keysheet/<name>.toml` if it has one, and otherwise runs
+//! `keylist-<name>` from PATH. All three print the same JSON array.
 //!
 //! stdout is nothing but JSON. Anything worth saying goes to stderr, so the
 //! output stays something you can pipe without reading first.
@@ -14,6 +12,7 @@ use std::path::PathBuf;
 use std::process::{Command, ExitCode};
 
 use keysheet::adaptors;
+use keysheet::sheet::Sheet;
 
 const USAGE: &str = "\
 keylist -- one program's keybindings, as JSON
@@ -23,7 +22,9 @@ usage: keylist <adaptor> [options]
 adaptors
 
   sway              bindsym lines from ~/.config/sway/config and its includes
-  <name>            runs keylist-<name> from PATH, passing the rest along
+  <name>            the [lines] table in ~/.config/keysheet/<name>.toml, or
+                    keylist-<name> from PATH, passed the rest of the arguments
+  vim               ~/.vimrc, through the [lines] table of the shipped sheet
 
 options for sway
 
@@ -55,10 +56,49 @@ fn main() -> ExitCode {
 
     let rest: Vec<String> = args.collect();
     if adaptors::built_in(&adaptor) {
-        sway(rest)
-    } else {
-        delegate(&adaptor, rest)
+        return sway(rest);
     }
+    let sheet = match Sheet::load(&adaptor, &Sheet::path_for(&adaptor)) {
+        Ok(sheet) => sheet,
+        Err(complaint) => {
+            eprintln!("keylist: {complaint}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match sheet.lines() {
+        Some(lines) => from_lines(&adaptor, lines, &rest),
+        None => delegate(&adaptor, rest),
+    }
+}
+
+fn from_lines(adaptor: &str, lines: &adaptors::lines::Lines, rest: &[String]) -> ExitCode {
+    let compact = match rest {
+        [] => false,
+        [flag] if flag == "--compact" => true,
+        _ => {
+            eprintln!("keylist {adaptor}: only --compact is understood");
+            return ExitCode::FAILURE;
+        }
+    };
+    match adaptors::lines::read(lines) {
+        Ok(bindings) => {
+            println!("{}", render(&bindings, compact));
+            ExitCode::SUCCESS
+        }
+        Err(complaint) => {
+            eprintln!("keylist {adaptor}: {complaint}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn render(bindings: &[keysheet::binding::Binding], compact: bool) -> String {
+    let json = if compact {
+        serde_json::to_string(bindings)
+    } else {
+        serde_json::to_string_pretty(bindings)
+    };
+    json.expect("bindings serialise")
 }
 
 /// Hand over to `keylist-<name>`, replacing this process.
@@ -95,12 +135,7 @@ fn sway(args: Vec<String>) -> ExitCode {
     let found = adaptors::sway::parse(&options.config);
     let listed = if options.all { found } else { adaptors::sway::tidy(found) };
 
-    let json = if options.compact {
-        serde_json::to_string(&listed)
-    } else {
-        serde_json::to_string_pretty(&listed)
-    };
-    println!("{}", json.expect("bindings serialise"));
+    println!("{}", render(&listed, options.compact));
     ExitCode::SUCCESS
 }
 

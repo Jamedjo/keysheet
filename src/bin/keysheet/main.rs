@@ -243,19 +243,28 @@ fn build_ui(app: &gtk::Application, name: &str, sheet_config: &Sheet) {
                 columns.append(&lane);
                 boxes.push((lane, 0));
             }
+            // A sheet with no groups yields one nameless run. It is cut into
+            // a block per lane; a named group stays whole under its heading.
+            let mut blocks: Vec<(&str, &[Binding])> = Vec::new();
             for group in &groups {
+                if group.name.is_empty() {
+                    let size = group.bindings.len().div_ceil(wanted).max(1);
+                    blocks.extend(group.bindings.chunks(size).map(|chunk| ("", chunk)));
+                } else {
+                    blocks.push((&group.name, &group.bindings));
+                }
+            }
+            for (name, bindings) in blocks {
                 let (lane, count) = boxes
                     .iter_mut()
                     .min_by_key(|(_, count)| *count)
                     .expect("at least one lane");
                 let group_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
                 group_box.add_css_class("group");
-                // A sheet with no groups configured yields one nameless run,
-                // and a blank heading above it would read as a missing word.
-                if !group.name.is_empty() {
-                    group_box.append(&heading(&group.name));
+                if !name.is_empty() {
+                    group_box.append(&heading(name));
                 }
-                for binding in &group.bindings {
+                for binding in bindings {
                     group_box.append(&row(binding));
                 }
                 lane.append(&group_box);
@@ -264,7 +273,7 @@ fn build_ui(app: &gtk::Application, name: &str, sheet_config: &Sheet) {
                 // weighs its rows plus one. Counting the heading as two rows,
                 // as this did when a row was a single line, made a lane of
                 // many small groups look full while it was not.
-                *count += group.bindings.len() + 1;
+                *count += bindings.len() + 1;
             }
         }
     });
@@ -457,8 +466,15 @@ fn modifier(part: &str) -> Option<&'static str> {
 fn alternatives(tail: &str) -> Vec<(String, &'static str)> {
     let mut out: Vec<(String, &'static str)> = Vec::new();
     let mut current = String::new();
+    // Inside vim's <...> key notation a "/" is the key, as in <C-/>.
+    let mut bracketed = false;
     for c in tail.chars() {
-        if (c == '/' || c == '\u{2026}') && !current.is_empty() {
+        match c {
+            '<' => bracketed = true,
+            '>' => bracketed = false,
+            _ => {}
+        }
+        if (c == '/' || c == '\u{2026}') && !current.is_empty() && !bracketed {
             out.push((std::mem::take(&mut current), "key"));
             out.push((c.to_string(), "sep"));
         } else {

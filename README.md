@@ -65,6 +65,29 @@ three ways is said once. `--all` turns all of that off and prints every
 stdout is nothing but JSON. Anything worth saying — a config that is not there,
 an adaptor that does not exist — goes to stderr.
 
+## keylist vim, and other line-based configs
+
+Most keybinding configs put one binding on a line. A `[lines]` table in the
+sheet file describes that shape, and `keylist <name>` reads it:
+
+```toml
+[lines]
+files   = ["~/.vimrc"]
+comment = '"'
+binding = '^\s*(?P<mode>[nvxsoilct])?(?:nore)?map!?\s+(?P<keys>\S+)\s+(?P<command>.+)$'
+strip   = ['^:', '(?i)<cr>', '<Plug>']
+skip    = ['(?i)^<nop>$']
+```
+
+`binding` needs `keys` and `command` captures; `mode` is optional. The
+comment line directly above a binding is its description. Without one, the
+command is used, minus anything matching `strip`. Bindings whose command
+matches `skip` are left out.
+
+`sheets/vim.toml` is compiled in, so `keysheet vim` shows your `~/.vimrc`
+maps with no config written. tmux, i3 and hyprland need only a `[lines]`
+table of their own.
+
 ## The sheet file
 
 `keysheet sway` reads `~/.config/keysheet/sway.toml`. Every key in it is

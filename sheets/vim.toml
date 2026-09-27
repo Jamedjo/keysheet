@@ -1,0 +1,16 @@
+# The vim sheet, as it comes: every map in ~/.vimrc, ungrouped. Copy to
+# ~/.config/keysheet/vim.toml to add groups, or to read other files.
+
+title = "Vim"
+
+[foot]
+note = "read dynamically from ~/.vimrc"
+
+[lines]
+files = ["~/.vimrc"]
+comment = '"'
+# map, noremap and their mode forms (nmap, vnoremap, ...), with any
+# <silent>-style arguments before the keys.
+binding = '^\s*(?P<mode>[nvxsoilct])?(?:nore)?map!?\s+(?:<(?:buffer|nowait|silent|script|expr|unique)>\s*)*(?P<keys>\S+)\s+(?P<command>.+)$'
+strip = ['^:', '(?i)<cr>', '<Plug>']
+skip = ['(?i)^<nop>$']

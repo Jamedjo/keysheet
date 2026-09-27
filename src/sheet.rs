@@ -10,6 +10,7 @@
 //! What it can guess is the source: a sheet named `vim` runs `keylist vim`
 //! unless told otherwise, so the smallest useful sheet file is empty.
 
+use crate::adaptors::lines::Lines;
 use crate::binding::Binding;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -22,6 +23,7 @@ use std::path::{Path, PathBuf};
 fn built_in(name: &str) -> Option<&'static str> {
     match name {
         "sway" => Some(include_str!("../sheets/sway.toml")),
+        "vim" => Some(include_str!("../sheets/vim.toml")),
         _ => None,
     }
 }
@@ -63,6 +65,9 @@ pub struct Sheet {
 
     #[serde(default)]
     foot: Foot,
+
+    /// How `keylist <name>` reads a config with one binding per line.
+    lines: Option<Lines>,
 
     /// Matched in the order written, most specific first, because the words
     /// overlap: "move container to workspace" is about workspaces though it
@@ -152,6 +157,10 @@ impl Sheet {
 
     pub fn foot(&self) -> &Foot {
         &self.foot
+    }
+
+    pub fn lines(&self) -> Option<&Lines> {
+        self.lines.as_ref()
     }
 
     pub fn style(&self) -> PathBuf {

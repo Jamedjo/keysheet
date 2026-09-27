@@ -8,6 +8,7 @@ description = "The keybindings you configured, read out of the config that defin
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 toml = "1.1.4"
+regex = "1"
 
 # Only the sheet links GTK; keylist is a plain filter and has no business
 # pulling a toolkit in. v4_12 is what CssProvider::load_from_string needs; the

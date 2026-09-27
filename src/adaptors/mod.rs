@@ -1,11 +1,11 @@
-//! The adaptors built in, which is one.
+//! The adaptors built in.
 //!
-//! sway is here because it is what keysheet was written against and because
-//! its config is a file anyone can read. Everything else is a `keylist-<name>`
-//! command somewhere on PATH: the contract is a flat JSON array of bindings on
-//! stdout, which is small enough to implement in an afternoon or to describe
-//! to something that will write it for you.
+//! `lines` reads any config with one binding per line, described by a
+//! `[lines]` table in the sheet file. `sway` needs more than that: mode
+//! blocks, variables and includes. Anything else is a `keylist-<name>`
+//! command on PATH that prints a JSON array of bindings.
 
+pub mod lines;
 pub mod sway;
 
 /// Whether `keylist <name>` is answered from in here.
